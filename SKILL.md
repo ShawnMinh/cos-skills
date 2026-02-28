@@ -4,75 +4,113 @@ description: >
   腾讯云对象存储(COS)和数据万象(CI)集成技能。当用户需要上传、下载、管理云存储文件，
   或需要进行图片处理（质量评估、超分辨率、抠图、二维码识别、水印）、智能图片搜索、
   文档转PDF、视频智能封面生成等操作时使用此技能。
+metadata:
+  {
+    "openclaw":
+      {
+        "emoji": "☁️",
+        "requires": {},
+        "install":
+          [
+            {
+              "id": "node-mcporter",
+              "kind": "node",
+              "package": "mcporter",
+              "bins": ["mcporter"],
+              "label": "Install mcporter (MCP CLI)",
+            },
+            {
+              "id": "node-cos-mcp",
+              "kind": "node",
+              "package": "cos-mcp",
+              "bins": ["cos-mcp"],
+              "label": "Install cos-mcp (COS MCP Server)",
+            },
+            {
+              "id": "node-cos-sdk",
+              "kind": "node",
+              "package": "cos-nodejs-sdk-v5",
+              "label": "Install COS Node.js SDK",
+            },
+          ],
+      },
+  }
 ---
 
 # 腾讯云 COS 技能
 
-集成腾讯云对象存储(COS)和数据万象(CI)的完整能力。提供三种执行方式按优先级降级，确保操作始终可完成：
+通过 cos-mcp MCP 工具 + Node.js SDK 脚本 + COSCMD 管理腾讯云对象存储和数据万象。
 
-1. **方式一：cos-mcp MCP 工具**（优先） — 功能最全，支持存储操作 + 图片处理 + 智能搜索 + 文档媒体处理
-2. **方式二：COS Node.js SDK 脚本** — 通过 `scripts/cos_node.mjs` 执行存储操作
-3. **方式三：COSCMD 命令行工具** — 通过 shell 命令执行存储操作
+## 首次使用 — 自动设置
+
+当用户首次要求操作 COS 时，按以下流程操作：
+
+### 步骤 1：检查当前状态
+
+```bash
+{baseDir}/scripts/setup.sh --check-only
+```
+
+如果输出显示一切 OK（cos-mcp 已安装、凭证已配置），跳到「执行策略」。
+
+### 步骤 2：如果未配置，引导用户提供凭证
+
+告诉用户：
+> 我需要你的腾讯云凭证来连接 COS 存储服务。请提供：
+> 1. **SecretId** — 腾讯云 API 密钥 ID
+> 2. **SecretKey** — 腾讯云 API 密钥 Key
+> 3. **Region** — 存储桶区域（如 ap-guangzhou）
+> 4. **Bucket** — 存储桶名称（格式 name-appid，如 mybucket-1250000000）
+> 5. **DatasetName**（可选） — 数据万象数据集名称（仅智能搜索需要）
+>
+> 你可以在 [腾讯云控制台 > 访问管理 > API密钥管理](https://console.cloud.tencent.com/cam/capi) 获取密钥，
+> 在 [COS 控制台](https://console.cloud.tencent.com/cos/bucket) 查看存储桶信息。
+
+### 步骤 3：用户提供凭证后，运行自动设置
+
+```bash
+{baseDir}/scripts/setup.sh --secret-id "<SecretId>" --secret-key "<SecretKey>" --region "<Region>" --bucket "<Bucket>"
+```
+
+如有 DatasetName：
+```bash
+{baseDir}/scripts/setup.sh --secret-id "<SecretId>" --secret-key "<SecretKey>" --region "<Region>" --bucket "<Bucket>" --dataset "<DatasetName>"
+```
+
+脚本会自动：
+- 检查并安装 mcporter（MCP 命令行工具）
+- 检查并安装 cos-mcp 和 cos-nodejs-sdk-v5
+- 创建/更新 `~/.mcporter/mcporter.json`，写入 cos-mcp 服务器配置
+- 将凭证写入 shell 配置文件（`~/.zshrc` 或 `~/.bashrc`），重启后仍可用
+- 配置 coscmd（如有 Python 环境）
+- 验证 COS 连接
+
+设置完成后即可开始使用。
 
 ## 执行策略
 
-按以下顺序尝试，遇到失败自动降级到下一种方式：
+三种方式按优先级降级，确保操作始终可完成：
+
+1. **方式一：cos-mcp MCP 工具**（优先） — 功能最全，支持存储 + 图片处理 + 智能搜索 + 文档媒体处理
+2. **方式二：Node.js SDK 脚本** — 通过 `scripts/cos_node.mjs` 执行存储操作
+3. **方式三：COSCMD 命令行** — 通过 shell 命令执行存储操作
 
 ```
-cos-mcp MCP 工具可用？（先安装再检测）
-  ├─ 是 → 使用方式一（全部功能）
-  └─ 否 → Node.js 可用？（node --version）
-              ├─ 是 → 安装 cos-nodejs-sdk-v5（若未安装）→ 使用方式二（存储操作）
-              └─ 否 → coscmd 命令可用？（which coscmd）
-                        ├─ 是 → 使用方式三（存储操作）
-                        └─ 否 → 提示用户安装任一工具
+mcporter + cos-mcp 可用？（which mcporter && 配置存在）
+  ├─ 是 → 使用方式一 mcporter 调用（全部功能）
+  └─ 否 → cos-mcp MCP 工具可直接调用？（getCosConfig 返回结果）
+              ├─ 是 → 使用方式一直接调用（全部功能）
+              └─ 否 → Node.js + cos-nodejs-sdk-v5 可用？
+                        ├─ 是 → 使用方式二（存储操作）
+                        └─ 否 → coscmd 可用？（which coscmd）
+                                  ├─ 是 → 使用方式三（存储操作）
+                                  └─ 否 → 运行 setup.sh 安装
 ```
 
-**判断方式一是否可用**：
-1. 先在当前项目安装 cos-mcp：`npm install cos-mcp`（若无 `package.json` 先 `npm init -y`）
-2. 尝试调用 `getCosConfig` MCP 工具，若工具存在且返回结果则可用
-3. 若 MCP 工具仍不可用（客户端未配置 MCP 服务器），则降级到方式二
-
-**判断方式二是否可用**：执行 `node --version` 确认 Node.js 可用，然后检查 `cos-nodejs-sdk-v5` 是否已安装（`node -e "require('cos-nodejs-sdk-v5')"`），若未安装则先执行 `npm install cos-nodejs-sdk-v5` 安装后再使用。
-**判断方式三是否可用**：执行 `which coscmd` 或 `coscmd --version` 有输出则可用。
-
-## 环境配置
-
-三种方式均需要以下腾讯云凭证：
-
-| 参数 | 说明 | 示例 |
-|------|------|------|
-| SecretId | API 密钥 ID | `AKIDxxxxxxxx` |
-| SecretKey | API 密钥 Key | `xxxxxxxx` |
-| Region | 存储桶区域 | `ap-guangzhou` |
-| Bucket | 存储桶名称 | `mybucket-1250000000` |
-| DatasetName | 数据万象数据集名称（仅智能搜索需要） | `my-dataset` |
-
-### 凭证持久化
-
-各方式的凭证存储位置不同，**配置一次后重启会话无需重新设置**：
-
-| 方式 | 持久化位置 | 说明 |
-|------|-----------|------|
-| 方式一 cos-mcp | 客户端 MCP 配置文件 | 写入后由客户端自动加载，无需重复配置 |
-| 方式二 Node SDK | shell 配置文件（`~/.zshrc` 或 `~/.bashrc`） | 需将环境变量写入 shell 配置文件 |
-| 方式三 COSCMD | `~/.cos.conf` | `coscmd config` 自动写入，后续直接可用 |
-
-**方式二环境变量持久化**：首次配置时将凭证写入 shell 配置文件：
-
-```bash
-cat >> ~/.zshrc << 'EOF'
-export TENCENT_COS_SECRET_ID="<替换为 API 密钥 ID>"
-export TENCENT_COS_SECRET_KEY="<替换为 API 密钥 Key>"
-export TENCENT_COS_REGION="<替换为存储桶区域>"
-export TENCENT_COS_BUCKET="<替换为存储桶名称>"
-EOF
-source ~/.zshrc
-```
-
-若使用 bash，将 `~/.zshrc` 替换为 `~/.bashrc`。
-
-> 密钥信息不要在对话中明文展示，引导用户自行编辑配置文件设置。
+**判断方式一(mcporter)**：`which mcporter` 且 `cat ~/.mcporter/mcporter.json | grep cos-mcp` 有输出。
+**判断方式一(直接)**：尝试调用 `getCosConfig` MCP 工具，若返回结果则可用。
+**判断方式二**：`node -e "require('cos-nodejs-sdk-v5')"` 成功则可用。
+**判断方式三**：`which coscmd` 有输出则可用。
 
 ---
 
@@ -80,238 +118,192 @@ source ~/.zshrc
 
 > GitHub: https://github.com/Tencent/cos-mcp
 
-### 安装配置
+MCP 配置模板见 `references/config_template.json`。
 
-#### 1. 安装 cos-mcp 到当前项目
+### 调用格式
+
+通过 mcporter 命令行调用 cos-mcp MCP 工具：
+
+```
+mcporter call cos-mcp.<tool_name> --config ~/.mcporter/mcporter.json --output json [--args '<JSON>']
+```
+
+列出所有可用工具：
+```
+mcporter list cos-mcp --config ~/.mcporter/mcporter.json --schema
+```
+
+**判断 mcporter 是否可用**：`which mcporter` 且 `~/.mcporter/mcporter.json` 包含 cos-mcp 配置。
+如果 mcporter 不可用，可回退到客户端直接调用 MCP 工具（`getCosConfig` 等）。
+
+### 工具总览
+
+| 类别 | 说明 |
+|------|------|
+| 存储操作 | 上传、下载、列出、获取签名URL |
+| 图片处理 | 质量评估、超分辨率、抠图、二维码识别、水印 |
+| 智能搜索 | 以图搜图、文本搜图（需预建数据集） |
+| 文档媒体 | 文档转PDF、视频智能封面（异步任务） |
+
+### 常用操作
+
+> 以下示例同时展示两种调用格式。mcporter 格式省略公共前缀 `mcporter call cos-mcp.` 和 `--config ~/.mcporter/mcporter.json --output json`。
+> 完整 mcporter 命令：`mcporter call cos-mcp.<tool> --config ~/.mcporter/mcporter.json --output json --args '<JSON>'`
+
+#### 存储
 
 ```bash
-npm install cos-mcp
+# 上传本地文件（mcporter 格式）
+mcporter call cos-mcp.putObject --config ~/.mcporter/mcporter.json --output json --args '{"filePath":"/path/to/file.jpg","targetDir":"images"}'
+
+# 上传本地文件（客户端直接调用格式）
+putObject  filePath="/path/to/file.jpg"  targetDir="images"
+
+# 上传字符串内容
+putString  content="hello world"  fileName="test.txt"  targetDir="docs"
+
+# 通过 URL 上传
+putObjectSourceUrl  sourceUrl="https://example.com/image.png"  targetDir="images"
+
+# 列出文件
+getBucket  Prefix="images/"
+
+# 下载文件
+getObject  objectKey="images/photo.jpg"
+
+# 获取签名下载链接
+getObjectUrl  objectKey="images/photo.jpg"
 ```
 
-若当前目录无 `package.json`，先执行 `npm init -y`。
+#### 图片处理
 
-#### 2. 在客户端 MCP 配置中注册
+```
+# 图片质量评估
+assessQuality  objectKey="images/photo.jpg"
 
-在客户端（Claude Desktop、CodeBuddy 等）的 MCP 配置文件中注册：
+# AI 超分辨率
+aiSuperResolution  objectKey="images/photo.jpg"
 
-```json
-{
-  "mcpServers": {
-    "cos-mcp": {
-      "command": "npx",
-      "args": ["cos-mcp", "--connectType=stdio"],
-      "env": {
-        "TENCENT_COS_SECRET_ID": "<SecretId>",
-        "TENCENT_COS_SECRET_KEY": "<SecretKey>",
-        "TENCENT_COS_REGION": "<Region>",
-        "TENCENT_COS_BUCKET": "<Bucket>"
-      }
-    }
-  }
-}
+# AI 智能抠图
+aiPicMatting  objectKey="images/photo.jpg"
+
+# 二维码识别
+aiQrcode  objectKey="images/qrcode.jpg"
+
+# 添加文字水印
+waterMarkFont  objectKey="images/photo.jpg"  text="版权所有"
+
+# 获取图片元信息
+imageInfo  objectKey="images/photo.jpg"
 ```
 
-完整配置模板见 `references/config_template.json`。
+#### 智能搜索（需预建数据集）
 
-### 存储操作工具
+```
+# 以图搜图
+imageSearchPic  uri="https://example.com/query.jpg"
 
-| 工具 | 用途 | 必需参数 | 可选参数 |
-|------|------|----------|----------|
-| `getCosConfig` | 获取当前配置信息 | 无 | 无 |
-| `putObject` | 上传本地文件 | `filePath` | `fileName`, `targetDir` |
-| `putString` | 上传字符串内容 | `content`, `fileName` | `targetDir`, `contentType` |
-| `putBase64` | 上传 base64 内容 | `base64Content`, `fileName` | `targetDir`, `contentType` |
-| `putBuffer` | 上传 buffer 内容 | `content`, `fileName` | `targetDir`, `contentType`, `encoding` |
-| `putObjectSourceUrl` | 通过 URL 上传 | `sourceUrl` | `fileName`, `targetDir` |
-| `getObject` | 下载文件 | `objectKey` | 无 |
-| `getBucket` | 列出文件 | 无 | `Prefix` |
-| `getObjectUrl` | 获取签名下载链接 | `objectKey` | 无 |
+# 文本搜图
+imageSearchText  text="蓝天白云"
+```
 
-### 图片处理工具（数据万象 CI）
+#### 文档与媒体处理（异步任务）
 
-| 工具 | 用途 | 必需参数 | 可选参数 |
-|------|------|----------|----------|
-| `imageInfo` | 获取图片元信息 | `objectKey` | 无 |
-| `assessQuality` | 图片质量评估 | `objectKey` | 无 |
-| `aiSuperResolution` | AI 超分辨率 | `objectKey` | 无 |
-| `aiPicMatting` | AI 智能抠图 | `objectKey` | `width`, `height` |
-| `aiQrcode` | 二维码识别 | `objectKey` | 无 |
-| `waterMarkFont` | 添加文字水印 | `objectKey` | `text` |
+```
+# 文档转 PDF
+createDocToPdfJob  objectKey="docs/report.docx"
+# 查询任务结果
+describeDocProcessJob  jobId="<jobId>"
 
-### 智能搜索工具
+# 视频智能封面
+createMediaSmartCoverJob  objectKey="videos/demo.mp4"
+# 查询任务结果
+describeMediaJob  jobId="<jobId>"
+```
 
-需要预先在数据万象控制台创建数据集。
-
-| 工具 | 用途 | 必需参数 |
-|------|------|----------|
-| `imageSearchPic` | 以图搜图 | `uri` |
-| `imageSearchText` | 文本搜图 | `text` |
-
-### 文档与媒体处理工具
-
-| 工具 | 用途 | 必需参数 |
-|------|------|----------|
-| `createDocToPdfJob` | 文档转 PDF | `objectKey` |
-| `describeDocProcessJob` | 查询文档任务结果 | `jobId` |
-| `createMediaSmartCoverJob` | 视频智能封面 | `objectKey` |
-| `describeMediaJob` | 查询媒体任务结果 | `jobId` |
+工具详细参数定义见 `references/api_reference.md`。
 
 ---
 
-## 方式二：COS Node.js SDK 脚本
+## 方式二：Node.js SDK 脚本
 
 > 官方文档: https://www.tencentcloud.com/zh/document/product/436/8629
 
-当 cos-mcp MCP 工具不可用时，使用 `scripts/cos_node.mjs` 脚本通过 `cos-nodejs-sdk-v5` SDK 执行存储操作。
-
-### 安装依赖
-
-使用方式二前需确保 `cos-nodejs-sdk-v5` 已安装。执行检查和安装：
-
-```bash
-# 检查是否已安装
-node -e "require('cos-nodejs-sdk-v5')" 2>/dev/null || npm install cos-nodejs-sdk-v5
-```
-
-若在用户项目中操作，建议安装到项目目录；若无 `package.json`，先 `npm init -y` 再安装。
-
-### 使用方式
-
-通过 `node scripts/cos_node.mjs <action> [参数]` 执行，脚本从环境变量读取凭证。
-
-#### 上传文件
-
-```bash
-node scripts/cos_node.mjs upload --file /path/to/local/file.jpg --key remote/path/file.jpg
-```
-
-#### 上传字符串内容
-
-```bash
-node scripts/cos_node.mjs put-string --content "文本内容" --key remote/path/file.txt --content-type "text/plain"
-```
-
-#### 下载文件
-
-```bash
-node scripts/cos_node.mjs download --key remote/path/file.jpg --output /path/to/save/file.jpg
-```
-
-#### 列出文件
-
-```bash
-node scripts/cos_node.mjs list --prefix "images/"
-```
-
-#### 获取签名 URL
-
-```bash
-node scripts/cos_node.mjs sign-url --key remote/path/file.jpg --expires 3600
-```
-
-#### 删除文件
-
-```bash
-node scripts/cos_node.mjs delete --key remote/path/file.jpg
-```
-
-#### 查看文件信息
-
-```bash
-node scripts/cos_node.mjs head --key remote/path/file.jpg
-```
-
-所有命令输出 JSON 格式结果，可通过 `$?` 判断成功（0）或失败（非0）。
-
-### 限制
-
-方式二仅支持存储操作（上传、下载、列表、删除、签名URL），**不支持**图片处理、智能搜索、文档转换等数据万象功能。
-
----
-
-## 方式三：COSCMD 命令行工具
-
-> 官方文档: https://www.tencentcloud.com/zh/document/product/436/10976
-
-当方式一和方式二均不可用时，使用 COSCMD Python 命令行工具。
-
-### 安装配置
-
-```bash
-pip install coscmd
-coscmd config -a $TENCENT_COS_SECRET_ID -s $TENCENT_COS_SECRET_KEY -b $TENCENT_COS_BUCKET -r $TENCENT_COS_REGION
-```
-
-配置写入 `~/.cos.conf`，后续使用无需重复配置。
+当 cos-mcp 不可用时，通过 `scripts/cos_node.mjs` 执行存储操作。凭证从环境变量读取。
 
 ### 常用命令
 
-#### 上传
+> 以下省略 `node {baseDir}/scripts/cos_node.mjs` 前缀。完整格式：`node {baseDir}/scripts/cos_node.mjs <action> [options]`
 
 ```bash
-# 上传单个文件
+# 上传文件
+upload --file /path/to/file.jpg --key remote/path/file.jpg
+
+# 上传字符串
+put-string --content "文本内容" --key remote/file.txt --content-type "text/plain"
+
+# 下载文件
+download --key remote/path/file.jpg --output /path/to/save/file.jpg
+
+# 列出文件
+list --prefix "images/"
+
+# 获取签名 URL
+sign-url --key remote/path/file.jpg --expires 3600
+
+# 查看文件信息
+head --key remote/path/file.jpg
+
+# 删除文件
+delete --key remote/path/file.jpg
+```
+
+所有命令输出 JSON 格式，`success: true` 表示成功，退出码 0。
+
+### 限制
+
+仅支持存储操作，**不支持**图片处理、智能搜索、文档转换。
+
+---
+
+## 方式三：COSCMD 命令行
+
+> 官方文档: https://www.tencentcloud.com/zh/document/product/436/10976
+
+当方式一和方式二均不可用时使用。配置持久化在 `~/.cos.conf`。
+
+### 常用命令
+
+```bash
+# 上传
 coscmd upload /path/to/file.jpg remote/path/file.jpg
-
-# 递归上传目录
 coscmd upload -r /path/to/folder/ remote/folder/
-```
 
-#### 下载
-
-```bash
-# 下载单个文件
+# 下载
 coscmd download remote/path/file.jpg /path/to/save/file.jpg
-
-# 递归下载目录
 coscmd download -r remote/folder/ /path/to/save/
-```
 
-#### 列出文件
-
-```bash
-# 列出指定前缀下的文件
+# 列出文件
 coscmd list images/
 
-# 递归列出并统计
-coscmd list -r images/
-```
-
-#### 删除
-
-```bash
-# 删除单个文件
+# 删除
 coscmd delete remote/path/file.jpg
-
-# 递归删除目录
 coscmd delete -r remote/folder/ -f
-```
 
-#### 获取签名 URL
-
-```bash
-# 获取有效期 3600 秒的下载链接
+# 签名 URL
 coscmd signurl remote/path/file.jpg -t 3600
-```
 
-#### 查看文件信息
-
-```bash
+# 文件信息
 coscmd info remote/path/file.jpg
-```
 
-#### 复制/移动
-
-```bash
-# 桶内复制
+# 复制/移动
 coscmd copy <BucketName-APPID>.cos.<Region>.myqcloud.com/source.jpg dest.jpg
-
-# 移动（复制后删除源文件）
 coscmd move <BucketName-APPID>.cos.<Region>.myqcloud.com/source.jpg dest.jpg
 ```
 
 ### 限制
 
-方式三仅支持存储操作，**不支持**图片处理、智能搜索、文档转换等数据万象功能。
+仅支持存储操作，**不支持**图片处理、智能搜索、文档转换。
 
 ---
 
@@ -333,47 +325,16 @@ coscmd move <BucketName-APPID>.cos.<Region>.myqcloud.com/source.jpg dest.jpg
 | 文档转 PDF | ✅ | ❌ | ❌ |
 | 视频智能封面 | ✅ | ❌ | ❌ |
 
-## 工作流程
+## 使用规范
 
-### 文件上传
-
-1. 按执行策略确定可用方式
-2. 确认本地文件路径存在
-3. 执行上传：
-   - 方式一：调用 `putObject`，上传后调用 `getObjectUrl` 获取链接
-   - 方式二：`node scripts/cos_node.mjs upload --file <path> --key <key>`，再 `sign-url` 获取链接
-   - 方式三：`coscmd upload <localpath> <cospath>`，再 `coscmd signurl <cospath>` 获取链接
-4. 返回访问链接给用户
-
-### 文件下载
-
-1. 按执行策略确定可用方式
-2. 执行下载：
-   - 方式一：调用 `getObject`
-   - 方式二：`node scripts/cos_node.mjs download --key <key> --output <path>`
-   - 方式三：`coscmd download <cospath> <localpath>`
-3. 返回本地文件路径
-
-### 图片处理（仅方式一）
-
-1. 确认目标图片已在存储桶中（必要时先上传）
-2. 调用对应图片处理工具
-3. 若方式一不可用，提示用户：图片处理功能需要 cos-mcp MCP 工具支持
-
-### 文档转换（仅方式一）
-
-1. 确认文档已在存储桶中
-2. 调用 `createDocToPdfJob` 创建任务
-3. 使用 `describeDocProcessJob` 轮询结果
-4. 若方式一不可用，提示用户：文档转换功能需要 cos-mcp MCP 工具支持
-
-## 注意事项
-
-- 所有文件路径（`objectKey`/`cospath`/`--key`）均为存储桶内的相对路径，如 `images/photo.jpg`
-- 图片处理、智能搜索、文档转换等数据万象功能**仅方式一可用**，方式二和方式三仅覆盖基础存储操作
-- 智能搜索需预先创建数据集并建立索引
-- 文档转换和视频封面为异步任务，需通过 `jobId` 轮询结果
-- 上传时如未指定目标文件名，默认使用原始文件名
-- 方式二脚本源码见 `scripts/cos_node.mjs`
-- MCP 工具详细参数参考见 `references/api_reference.md`
-- MCP 配置模板见 `references/config_template.json`
+1. **首次使用先运行** `{baseDir}/scripts/setup.sh --check-only` 检查环境
+2. **mcporter 调用必须带** `--config ~/.mcporter/mcporter.json` 和 `--output json`
+3. **凭证不明文展示**：引导用户自行通过 setup.sh 或编辑配置文件设置
+4. **所有文件路径**（`objectKey`/`cospath`/`--key`）为存储桶内的相对路径，如 `images/photo.jpg`
+5. **图片处理/智能搜索/文档转换仅方式一可用**，不可用时明确告知用户
+6. **异步任务**（文档转换、视频封面）需通过 `jobId` 轮询结果
+7. **上传后主动获取链接**：上传完成后调用 `getObjectUrl` 或 `sign-url` 返回访问链接
+8. **错误处理**：调用失败时先用 `setup.sh --check-only` 诊断环境问题
+9. **方式二脚本源码**见 `scripts/cos_node.mjs`
+10. **MCP 工具详细参数**见 `references/api_reference.md`
+11. **MCP 配置模板**见 `references/config_template.json`

@@ -2,6 +2,8 @@
 
 本文档记录三种操作方式的详细参数定义，供执行操作时查阅。
 
+**环境设置**：首次使用请运行 `scripts/setup.sh`，详见 `SKILL.md` 首次使用章节。
+
 **官方文档链接：**
 - cos-mcp GitHub: https://github.com/Tencent/cos-mcp
 - COS Node.js SDK: https://www.tencentcloud.com/zh/document/product/436/8629
